@@ -1,0 +1,6 @@
+{
+  "parent": "loffsfieldchess:block/chess_table",
+  "textures": {
+    "wood": "minecraft:block/warped_planks"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "loffsfieldchess:item/white_chess_pieces"
+  }
+}

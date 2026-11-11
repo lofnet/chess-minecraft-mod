@@ -1,0 +1,43 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "loffsfieldchess:chess_table",
+          "functions": [
+            {
+              "function": "minecraft:copy_state",
+              "block": "loffsfieldchess:chess_table",
+              "properties": [
+                "wood_type"
+              ]
+            },
+            {
+              "function": "minecraft:copy_nbt",
+              "source": "block_entity",
+              "ops": [
+                {"source": "FeltColor", "target": "BlockEntityTag.FeltColor", "op": "replace"},
+                {"source": "Fen", "target": "BlockEntityTag.Fen", "op": "replace"},
+                {"source": "Moves", "target": "BlockEntityTag.Moves", "op": "replace"},
+                {"source": "WhiteName", "target": "BlockEntityTag.WhiteName", "op": "replace"},
+                {"source": "BlackName", "target": "BlockEntityTag.BlackName", "op": "replace"},
+                {"source": "ClockPreset", "target": "BlockEntityTag.ClockPreset", "op": "replace"},
+                {"source": "WhiteMillis", "target": "BlockEntityTag.WhiteMillis", "op": "replace"},
+                {"source": "BlackMillis", "target": "BlockEntityTag.BlackMillis", "op": "replace"},
+                {"source": "WhiteActive", "target": "BlockEntityTag.WhiteActive", "op": "replace"},
+                {"source": "FlaggedSide", "target": "BlockEntityTag.FlaggedSide", "op": "replace"},
+                {"source": "MatchResult", "target": "BlockEntityTag.MatchResult", "op": "replace"},
+                {"source": "DrawOfferSide", "target": "BlockEntityTag.DrawOfferSide", "op": "replace"},
+                {"source": "WhitePlayer", "target": "BlockEntityTag.WhitePlayer", "op": "replace"},
+                {"source": "BlackPlayer", "target": "BlockEntityTag.BlackPlayer", "op": "replace"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
