@@ -27,7 +27,7 @@ public final class ChessClientPacketHandler {
             menu.updateState(message.fen(), message.whiteName(), message.blackName(), message.assignedSide(),
                     message.decodedClockPreset(), message.whiteMillis(), message.blackMillis(),
                     message.drawOfferSide(), message.decodedMatchResult(), message.moveCount(),
-                    feltColor);
+                    feltColor, message.lastMoveFrom(), message.lastMoveTo());
         }
     }
 

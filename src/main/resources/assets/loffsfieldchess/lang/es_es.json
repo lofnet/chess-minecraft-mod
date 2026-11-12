@@ -12,6 +12,7 @@
   "gui.loffsfieldchess.black_wins": "Ganan negras",
   "gui.loffsfieldchess.white_wins_overlay": "¡Ganan las blancas!",
   "gui.loffsfieldchess.black_wins_overlay": "¡Ganan las negras!",
+  "gui.loffsfieldchess.draw_overlay": "Draw",
   "gui.loffsfieldchess.draw": "Tablas",
   "gui.loffsfieldchess.spectating": "Espectador",
   "gui.loffsfieldchess.you_are_white": "Juegas con blancas",
@@ -46,5 +47,15 @@
   "gui.loffsfieldchess.black_resigned": "Abandonan negras; ganan blancas",
   "gui.loffsfieldchess.white_flagged": "Se acabó el tiempo de blancas",
   "gui.loffsfieldchess.black_flagged": "Se acabó el tiempo de negras",
-  "gui.loffsfieldchess.waiting_for_opponent": "Esperando al rival"
+  "gui.loffsfieldchess.waiting_for_opponent": "Esperando al rival",
+  "advancements.loffsfieldchess.first_white_win.title": "Primera victoria con blancas",
+  "advancements.loffsfieldchess.first_white_win.description": "Gana tu primera partida de ajedrez jugando con blancas.",
+  "advancements.loffsfieldchess.first_black_win.title": "Primera victoria con negras",
+  "advancements.loffsfieldchess.first_black_win.description": "Gana tu primera partida de ajedrez jugando con negras.",
+  "advancements.loffsfieldchess.first_draw.title": "Tablas",
+  "advancements.loffsfieldchess.first_draw.description": "Termina tu primera partida de ajedrez en tablas.",
+  "advancements.loffsfieldchess.first_checkmate.title": "Jaque mate",
+  "advancements.loffsfieldchess.first_checkmate.description": "Gana una partida dando jaque mate.",
+  "advancements.loffsfieldchess.first_en_passant.title": "Al paso",
+  "advancements.loffsfieldchess.first_en_passant.description": "Captura un peón al paso."
 }

@@ -1,0 +1,22 @@
+{
+  "parent": "minecraft:adventure/root",
+  "display": {
+    "icon": {
+      "item": "loffsfieldchess:black_chess_pieces"
+    },
+    "title": {
+      "translate": "advancements.loffsfieldchess.first_black_win.title"
+    },
+    "description": {
+      "translate": "advancements.loffsfieldchess.first_black_win.description"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "complete": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

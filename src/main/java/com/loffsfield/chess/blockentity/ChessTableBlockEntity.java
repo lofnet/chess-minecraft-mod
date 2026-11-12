@@ -1,8 +1,9 @@
 package com.loffsfield.chess.blockentity;
 
+import com.loffsfield.chess.advancement.ChessAdvancements;
+import com.loffsfield.chess.game.ChessClock;
 import com.loffsfield.chess.game.ChessGame;
 import com.loffsfield.chess.game.ChessMove;
-import com.loffsfield.chess.game.ChessClock;
 import com.loffsfield.chess.game.ChessResult;
 import com.loffsfield.chess.game.ClockPreset;
 import com.loffsfield.chess.game.MatchResult;
@@ -20,8 +21,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.DyeColor;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.MenuProvider;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
@@ -43,8 +47,12 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
     private int drawOfferSide = -1;
     @Nullable private UUID whitePlayer;
     @Nullable private UUID blackPlayer;
+    @Nullable private PendingPremove whitePremove;
+    @Nullable private PendingPremove blackPremove;
     private String whiteName = "-";
     private String blackName = "-";
+    private int lastMoveFrom = -1;
+    private int lastMoveTo = -1;
 
     public ChessTableBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.CHESS_TABLE.get(), pos, state);
@@ -80,6 +88,14 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
         return matchResult;
     }
 
+    public int getLastMoveFrom() {
+        return lastMoveFrom;
+    }
+
+    public int getLastMoveTo() {
+        return lastMoveTo;
+    }
+
     public DyeColor getFeltColor() {
         return feltColor;
     }
@@ -99,6 +115,7 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
     }
 
     public void join(ServerPlayer player, Direction whiteSide) {
+        releaseInactivePlayers();
         UUID playerId = player.getUUID();
         double whiteSideDistance = (player.getX() - (worldPosition.getX() + 0.5D)) * whiteSide.getStepX()
                 + (player.getZ() - (worldPosition.getZ() + 0.5D)) * whiteSide.getStepZ();
@@ -126,9 +143,11 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
                 blackName = "-";
             }
             if (requestedSide == 1) {
+                clearPremoveForDifferentOwner(1, playerId);
                 whitePlayer = playerId;
                 whiteName = player.getGameProfile().getName();
             } else {
+                clearPremoveForDifferentOwner(0, playerId);
                 blackPlayer = playerId;
                 blackName = player.getGameProfile().getName();
             }
@@ -144,43 +163,117 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
         }
     }
 
+    public void cancelPremove(ServerPlayer player) {
+        UUID playerId = player.getUUID();
+        if (whitePremove != null && whitePremove.owner().equals(playerId)) {
+            whitePremove = null;
+        }
+        if (blackPremove != null && blackPremove.owner().equals(playerId)) {
+            blackPremove = null;
+        }
+    }
+
     private boolean isPlayerOffline(UUID playerId) {
         return level instanceof ServerLevel serverLevel
                 && serverLevel.getServer().getPlayerList().getPlayer(playerId) == null;
+    }
+
+    private void releaseInactivePlayers() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        ServerPlayer white = whitePlayer == null ? null : serverLevel.getServer().getPlayerList().getPlayer(whitePlayer);
+        ServerPlayer black = blackPlayer == null ? null : serverLevel.getServer().getPlayerList().getPlayer(blackPlayer);
+        boolean changed = false;
+        if (whitePlayer != null && !isUsingThisTable(white)) {
+            whitePlayer = null;
+            whiteName = "-";
+            changed = true;
+        }
+        if (blackPlayer != null && !isUsingThisTable(black)) {
+            blackPlayer = null;
+            blackName = "-";
+            changed = true;
+        }
+        if (changed && clock.running()) {
+            if (clock.tick(nowMillis())) {
+                finishFlaggedClock();
+            } else {
+                clock.stop();
+            }
+        }
+        if (changed) {
+            markChangedAndSync();
+        }
+    }
+
+    private boolean isUsingThisTable(@Nullable ServerPlayer player) {
+        return player != null && player.containerMenu instanceof ChessTableMenu menu
+                && menu.getTablePos().equals(worldPosition);
+    }
+
+    public void leave(ServerPlayer player) {
+        UUID playerId = player.getUUID();
+        boolean changed = false;
+        if (playerId.equals(whitePlayer)) {
+            whitePlayer = null;
+            whiteName = "-";
+            changed = true;
+        } else if (playerId.equals(blackPlayer)) {
+            blackPlayer = null;
+            blackName = "-";
+            changed = true;
+        }
+        if (changed && clock.running()) {
+            if (clock.tick(nowMillis())) {
+                finishFlaggedClock();
+            } else {
+                clock.stop();
+            }
+        }
+        if (changed) {
+            markChangedAndSync();
+        }
     }
 
     public void sendStateTo(ServerPlayer player) {
         ChessNetwork.sendState(player, this, playerSide(player));
     }
 
-    public void submitMove(ServerPlayer player, ChessMove move) {
+    public void queuePremove(ServerPlayer player, ChessMove move) {
         int side = playerSide(player);
-        if (side < 0 || matchResult.isFinished() || (side == 1) != game.isWhiteToMove()
-                || !game.legalMoves().contains(move)) {
+        if (side < 0 || matchResult.isFinished() || game.result() != ChessResult.IN_PROGRESS
+                || (side == 1) == game.isWhiteToMove()) {
             return;
         }
-        if (!clock.finishMove(side == 1, nowMillis())) {
-            if (clock.flaggedSide() >= 0) {
-                matchResult = clock.flaggedSide() == 1 ? MatchResult.WHITE_FLAGGED : MatchResult.BLACK_FLAGGED;
-                clock.stop();
+        char piece = game.pieceAt(move.from());
+        if (piece == '\0' || Character.isUpperCase(piece) != (side == 1)) {
+            return;
+        }
+        PendingPremove premove = new PendingPremove(move, player.getUUID());
+        if (side == 1) {
+            whitePremove = premove;
+        } else {
+            blackPremove = premove;
+        }
+    }
+
+    public void submitMove(ServerPlayer player, ChessMove move) {
+        int side = playerSide(player);
+        if (side < 0 || matchResult.isFinished() || (side == 1) != game.isWhiteToMove()) {
+            return;
+        }
+        if (!applyMove(move, player.getUUID())) {
+            if (matchResult.isFinished()) {
                 markChangedAndSync();
             }
             return;
         }
-        if (!game.makeMove(move)) {
+        if (matchResult.isFinished()) {
+            markChangedAndSync();
             return;
         }
-        drawOfferSide = -1;
-        switch (game.result()) {
-            case WHITE_CHECKMATE -> matchResult = MatchResult.BLACK_CHECKMATED;
-            case BLACK_CHECKMATE -> matchResult = MatchResult.WHITE_CHECKMATED;
-            case DRAW_STALEMATE -> matchResult = MatchResult.STALEMATE;
-            case IN_PROGRESS -> {
-            }
-        }
-        if (matchResult.isFinished()) {
-            clock.stop();
-        }
+        applyQueuedPremove();
         markChangedAndSync();
     }
 
@@ -220,7 +313,7 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
             } else {
                 drawOfferSide = -1;
                 matchResult = MatchResult.DRAW_AGREED;
-                clock.stop();
+                completeMatch();
             }
             markChangedAndSync();
         } else if (action == com.loffsfield.chess.network.MatchActionMessage.RESIGN) {
@@ -228,7 +321,7 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
                 return;
             }
             matchResult = side == 1 ? MatchResult.WHITE_RESIGNED : MatchResult.BLACK_RESIGNED;
-            clock.stop();
+            completeMatch();
             markChangedAndSync();
         } else if (action == com.loffsfield.chess.network.MatchActionMessage.NEW_GAME) {
             if (!matchResult.isFinished()) {
@@ -237,6 +330,9 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
             game = new ChessGame();
             matchResult = MatchResult.ACTIVE;
             drawOfferSide = -1;
+            lastMoveFrom = -1;
+            lastMoveTo = -1;
+            clearPremoves();
             clock.configure(clock.preset());
             if (whitePlayer != null && blackPlayer != null) {
                 clock.start(nowMillis(), true);
@@ -310,7 +406,143 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
     private void finishFlaggedClock() {
         matchResult = clock.flaggedSide() == 1
                 ? MatchResult.WHITE_FLAGGED : MatchResult.BLACK_FLAGGED;
+        completeMatch();
+    }
+
+    private void completeMatch() {
+        completeMatch(null);
+    }
+
+    private void completeMatch(@Nullable UUID winningMover) {
         clock.stop();
+        clearPremoves();
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (matchResult == MatchResult.STALEMATE || matchResult == MatchResult.DRAW_AGREED) {
+            awardPlayer(serverLevel, whitePlayer, ChessAdvancements.FIRST_DRAW);
+            awardPlayer(serverLevel, blackPlayer, ChessAdvancements.FIRST_DRAW);
+            playSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.8F, 1.0F);
+            return;
+        }
+
+        boolean whiteWon = matchResult == MatchResult.BLACK_CHECKMATED
+                || matchResult == MatchResult.BLACK_RESIGNED || matchResult == MatchResult.BLACK_FLAGGED;
+        UUID winnerId = whiteWon ? whitePlayer : blackPlayer;
+        if (winnerId == null) {
+            winnerId = winningMover;
+        }
+        awardPlayer(serverLevel, winnerId,
+                whiteWon ? ChessAdvancements.FIRST_WHITE_WIN : ChessAdvancements.FIRST_BLACK_WIN);
+        if (matchResult == MatchResult.WHITE_CHECKMATED || matchResult == MatchResult.BLACK_CHECKMATED) {
+            awardPlayer(serverLevel, winnerId, ChessAdvancements.FIRST_CHECKMATE);
+            playSound(SoundEvents.GENERIC_EXPLODE, 0.8F, 1.0F);
+        } else {
+            playSound(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 0.8F, 1.0F);
+        }
+    }
+
+    private void awardPlayer(ServerLevel serverLevel, @Nullable UUID playerId, String advancementId) {
+        if (playerId == null) {
+            return;
+        }
+        ServerPlayer player = serverLevel.getServer().getPlayerList().getPlayer(playerId);
+        if (player != null) {
+            ChessAdvancements.award(player, advancementId);
+        }
+    }
+
+    private void applyQueuedPremove() {
+        boolean movingWhite = game.isWhiteToMove();
+        PendingPremove premove = movingWhite ? whitePremove : blackPremove;
+        if (premove == null) {
+            return;
+        }
+        if (clock.preset().isTimed() && !clock.running()) {
+            return;
+        }
+        if (!(level instanceof ServerLevel serverLevel)
+                || serverLevel.getServer().getPlayerList().getPlayer(premove.owner()) == null) {
+            clearPremove(movingWhite ? 1 : 0);
+            return;
+        }
+        clearPremove(movingWhite ? 1 : 0);
+        applyMove(premove.move(), premove.owner());
+    }
+
+    private boolean applyMove(ChessMove move, UUID moverId) {
+        boolean movingWhite = game.isWhiteToMove();
+        if (matchResult.isFinished() || !game.legalMoves().contains(move)) {
+            return false;
+        }
+        if (!clock.finishMove(movingWhite, nowMillis())) {
+            if (clock.flaggedSide() >= 0) {
+                matchResult = clock.flaggedSide() == 1 ? MatchResult.WHITE_FLAGGED : MatchResult.BLACK_FLAGGED;
+                completeMatch();
+            }
+            return false;
+        }
+
+        char movingPiece = game.pieceAt(move.from());
+        char capturedPiece = game.pieceAt(move.to());
+        boolean enPassant = Character.toUpperCase(movingPiece) == 'P'
+                && move.from() % 8 != move.to() % 8 && capturedPiece == '\0';
+        boolean capture = capturedPiece != '\0' || enPassant;
+        if (!game.makeMove(move)) {
+            return false;
+        }
+        lastMoveFrom = move.from();
+        lastMoveTo = move.to();
+        if (enPassant) {
+            if (level instanceof ServerLevel serverLevel) {
+                awardPlayer(serverLevel, moverId, ChessAdvancements.FIRST_EN_PASSANT);
+            }
+        }
+        boolean givesCheck = game.isInCheck(game.isWhiteToMove());
+        drawOfferSide = -1;
+        switch (game.result()) {
+            case WHITE_CHECKMATE -> matchResult = MatchResult.BLACK_CHECKMATED;
+            case BLACK_CHECKMATE -> matchResult = MatchResult.WHITE_CHECKMATED;
+            case DRAW_STALEMATE -> matchResult = MatchResult.STALEMATE;
+            case IN_PROGRESS -> {
+            }
+        }
+        if (matchResult.isFinished()) {
+            completeMatch(moverId);
+        } else if (givesCheck) {
+            playSound(SoundEvents.ARROW_HIT_PLAYER, 0.9F, 1.0F);
+        } else if (capture) {
+            playSound(SoundEvents.SKELETON_HURT, 0.7F, 1.0F);
+        } else {
+            playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.7F, 1.0F);
+        }
+        return true;
+    }
+
+    private void clearPremoveForDifferentOwner(int side, UUID playerId) {
+        PendingPremove premove = side == 1 ? whitePremove : blackPremove;
+        if (premove != null && !premove.owner().equals(playerId)) {
+            clearPremove(side);
+        }
+    }
+
+    private void clearPremove(int side) {
+        if (side == 1) {
+            whitePremove = null;
+        } else {
+            blackPremove = null;
+        }
+    }
+
+    private void clearPremoves() {
+        whitePremove = null;
+        blackPremove = null;
+    }
+
+    private void playSound(SoundEvent sound, float volume, float pitch) {
+        if (level != null && !level.isClientSide) {
+            level.playSound(null, worldPosition, sound, SoundSource.BLOCKS, volume, pitch);
+        }
     }
 
     private void updateFeltColor(DyeColor feltColor) {
@@ -343,6 +575,8 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
         tag.putInt("FlaggedSide", clock.flaggedSide());
         tag.putInt("MatchResult", matchResult.ordinal());
         tag.putInt("DrawOfferSide", drawOfferSide);
+        tag.putInt("LastMoveFrom", lastMoveFrom);
+        tag.putInt("LastMoveTo", lastMoveTo);
         if (whitePlayer != null) {
             tag.putUUID("WhitePlayer", whitePlayer);
         }
@@ -383,6 +617,12 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
                 tag.contains("FlaggedSide", Tag.TAG_INT) ? tag.getInt("FlaggedSide") : -1);
         matchResult = result;
         drawOfferSide = tag.contains("DrawOfferSide", Tag.TAG_INT) ? tag.getInt("DrawOfferSide") : -1;
+        lastMoveFrom = tag.contains("LastMoveFrom", Tag.TAG_INT) ? tag.getInt("LastMoveFrom") : -1;
+        lastMoveTo = tag.contains("LastMoveTo", Tag.TAG_INT) ? tag.getInt("LastMoveTo") : -1;
+        if ((lastMoveFrom == -1 && lastMoveTo != -1) || (lastMoveFrom != -1
+                && (lastMoveFrom < 0 || lastMoveFrom >= 64 || lastMoveTo < 0 || lastMoveTo >= 64))) {
+            throw new IllegalArgumentException("Invalid saved last chess move");
+        }
         if (!matchResult.isFinished() && clock.flaggedSide() >= 0) {
             matchResult = clock.flaggedSide() == 1 ? MatchResult.WHITE_FLAGGED : MatchResult.BLACK_FLAGGED;
         } else if (!matchResult.isFinished()) {
@@ -414,5 +654,8 @@ public final class ChessTableBlockEntity extends BlockEntity implements MenuProv
     @Override
     public ClientboundBlockEntityDataPacket getUpdatePacket() {
         return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    private record PendingPremove(ChessMove move, UUID owner) {
     }
 }

@@ -32,6 +32,8 @@ public final class ChessTableMenu extends AbstractContainerMenu {
     private MatchResult matchResult = MatchResult.ACTIVE;
     private int moveCount;
     private DyeColor feltColor = DyeColor.GREEN;
+    private int lastMoveFrom = -1;
+    private int lastMoveTo = -1;
 
     public ChessTableMenu(int containerId, Inventory inventory, FriendlyByteBuf buffer) {
         this(containerId, inventory, buffer.readBlockPos());
@@ -98,10 +100,18 @@ public final class ChessTableMenu extends AbstractContainerMenu {
         return feltColor;
     }
 
+    public int getLastMoveFrom() {
+        return lastMoveFrom;
+    }
+
+    public int getLastMoveTo() {
+        return lastMoveTo;
+    }
+
     public void updateState(String fen, String whiteName, String blackName, int assignedSide,
                             ClockPreset clockPreset, long whiteMillis, long blackMillis,
                             int drawOfferSide, MatchResult matchResult, int moveCount,
-                            DyeColor feltColor) {
+                            DyeColor feltColor, int lastMoveFrom, int lastMoveTo) {
         if (!this.fen.equals(fen)) {
             game = ChessGame.fromFen(fen);
         }
@@ -116,6 +126,8 @@ public final class ChessTableMenu extends AbstractContainerMenu {
         this.matchResult = matchResult;
         this.moveCount = moveCount;
         this.feltColor = feltColor;
+        this.lastMoveFrom = lastMoveFrom;
+        this.lastMoveTo = lastMoveTo;
     }
 
     public void requestMove(ServerPlayer player, int from, int to, int promotion) {
@@ -149,5 +161,14 @@ public final class ChessTableMenu extends AbstractContainerMenu {
         return AbstractContainerMenu.stillValid(
                 ContainerLevelAccess.create(player.level(), tablePos), player,
                 com.loffsfield.chess.registry.ModBlocks.CHESS_TABLE.get());
+    }
+
+    @Override
+    public void removed(Player player) {
+        super.removed(player);
+        if (!player.level().isClientSide && player instanceof ServerPlayer serverPlayer
+                && player.level().getBlockEntity(tablePos) instanceof ChessTableBlockEntity table) {
+            table.leave(serverPlayer);
+        }
     }
 }

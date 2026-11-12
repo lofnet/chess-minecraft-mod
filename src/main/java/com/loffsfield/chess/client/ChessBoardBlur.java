@@ -27,15 +27,18 @@ final class ChessBoardBlur implements AutoCloseable {
     private int cachedAssignedSide = Integer.MIN_VALUE;
 
     void render(GuiGraphics graphics, ChessGame game, int assignedSide, DyeColor feltColor,
-                int[] boardColors, int x, int y) {
+                int[] boardColors, int x, int y, float alpha) {
         if (textureLocation == null || cachedGame != game || cachedFeltColor != feltColor
                 || cachedAssignedSide != assignedSide) {
             rebuild(game, assignedSide, feltColor, boardColors);
         }
 
+        graphics.setColor(1.0F, 1.0F, 1.0F, alpha);
         graphics.blit(textureLocation, x, y, BLUR_SIZE * 2, BLUR_SIZE * 2,
                 0, 0, BLUR_SIZE, BLUR_SIZE, BLUR_SIZE, BLUR_SIZE);
-        graphics.fill(x, y, x + BLUR_SIZE * 2, y + BLUR_SIZE * 2, 0x33000000);
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+        graphics.fill(x, y, x + BLUR_SIZE * 2, y + BLUR_SIZE * 2,
+                Math.round(0x33 * alpha) << 24);
     }
 
     @Override

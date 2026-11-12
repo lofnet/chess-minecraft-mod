@@ -6,18 +6,29 @@ licensed under GPL-3.0, matching the repository license.
 ## Current milestone
 
 The functional-blocks creative tab contains a chess table. Place it and
-right-click to open the 2D board. The first two players who open that table
-take White and Black; later players can spectate. The server validates moves
-with the chess-rules module, stores the current position as FEN on the table,
-and synchronizes it to players viewing that table.
+right-click to open the 2D board. The first two players using that table take
+White and Black; later players can spectate. Closing the table releases a
+player's seat, so a new pair can use it without disconnecting. The server
+validates moves with the chess-rules module, stores the current position as FEN
+on the table, and synchronizes it to players viewing that table.
 
 The 2D screen and piece-set item icons use JohnPablok's improved Cburnett chess
 set; the pieces rendered on the 3D table are still simple block sculptures.
-When a player wins, the board is blurred behind
-a clear winner banner. Left-click a piece and then a destination to move; pawn
-promotions currently choose a queen. Right-click a square to highlight it, or
-right-click and drag to draw an arrow. Left-clicking an empty square clears
-annotations. These annotations are local to each viewer.
+At the end of a game, the board blurs behind a winner or “Draw” banner that
+fades away after two seconds; checkmate banners wait half a second before
+appearing. Check briefly highlights the king's square, and the previous move's
+source and destination squares stay highlighted until the next move.
+Move pieces by clicking a source and destination or by dragging and dropping;
+premoves are queued on the server and validated when your turn arrives, even if
+you close the screen to switch sides; a red square and translucent piece preview
+show the queued destination. Pawn promotions currently choose a queen.
+Moves, captures, checks, and game endings play vanilla sounds.
+Right-click a square to highlight it, or right-click and drag to draw an arrow.
+Left-clicking an empty square clears annotations. These annotations are local
+to each viewer; clicking an empty square also cancels your queued premove.
+
+Minecraft advancements are awarded for a first win as each color, the first
+draw, the first checkmate, and the first en passant capture.
 
 The White seat faces the placer. Players who open the table from that side take
 White; the opposite side takes Black, and lateral approaches take the nearest

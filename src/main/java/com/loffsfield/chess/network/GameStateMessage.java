@@ -14,7 +14,8 @@ import java.util.function.Supplier;
 
 public record GameStateMessage(BlockPos pos, String fen, String whiteName, String blackName, int assignedSide,
                                int clockPreset, long whiteMillis, long blackMillis,
-                               int drawOfferSide, int matchResult, int moveCount, int feltColor) {
+                               int drawOfferSide, int matchResult, int moveCount, int feltColor,
+                               int lastMoveFrom, int lastMoveTo) {
     public static void encode(GameStateMessage message, FriendlyByteBuf buffer) {
         buffer.writeBlockPos(message.pos);
         buffer.writeUtf(message.fen, 128);
@@ -28,13 +29,15 @@ public record GameStateMessage(BlockPos pos, String fen, String whiteName, Strin
         buffer.writeByte(message.matchResult);
         buffer.writeVarInt(message.moveCount);
         buffer.writeByte(message.feltColor);
+        buffer.writeByte(message.lastMoveFrom);
+        buffer.writeByte(message.lastMoveTo);
     }
 
     public static GameStateMessage decode(FriendlyByteBuf buffer) {
         return new GameStateMessage(buffer.readBlockPos(), buffer.readUtf(128),
                 buffer.readUtf(32), buffer.readUtf(32), buffer.readByte(), buffer.readUnsignedByte(),
                 buffer.readLong(), buffer.readLong(), buffer.readByte(), buffer.readUnsignedByte(),
-                buffer.readVarInt(), buffer.readUnsignedByte());
+                buffer.readVarInt(), buffer.readUnsignedByte(), buffer.readByte(), buffer.readByte());
     }
 
     public static void handle(GameStateMessage message, Supplier<NetworkEvent.Context> contextSupplier) {

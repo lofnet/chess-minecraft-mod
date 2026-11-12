@@ -12,6 +12,7 @@
   "gui.loffsfieldchess.black_wins": "Black wins",
   "gui.loffsfieldchess.white_wins_overlay": "White wins!",
   "gui.loffsfieldchess.black_wins_overlay": "Black wins!",
+  "gui.loffsfieldchess.draw_overlay": "Draw",
   "gui.loffsfieldchess.draw": "Draw",
   "gui.loffsfieldchess.spectating": "Spectating",
   "gui.loffsfieldchess.you_are_white": "You are White",
@@ -46,5 +47,15 @@
   "gui.loffsfieldchess.black_resigned": "Black resigned; White wins",
   "gui.loffsfieldchess.white_flagged": "White ran out of time",
   "gui.loffsfieldchess.black_flagged": "Black ran out of time",
-  "gui.loffsfieldchess.waiting_for_opponent": "Waiting for opponent"
+  "gui.loffsfieldchess.waiting_for_opponent": "Waiting for opponent",
+  "advancements.loffsfieldchess.first_white_win.title": "First Win as White",
+  "advancements.loffsfieldchess.first_white_win.description": "Win your first chess game playing as White.",
+  "advancements.loffsfieldchess.first_black_win.title": "First Win as Black",
+  "advancements.loffsfieldchess.first_black_win.description": "Win your first chess game playing as Black.",
+  "advancements.loffsfieldchess.first_draw.title": "Draw",
+  "advancements.loffsfieldchess.first_draw.description": "Finish your first chess game in a draw.",
+  "advancements.loffsfieldchess.first_checkmate.title": "Checkmate",
+  "advancements.loffsfieldchess.first_checkmate.description": "Win a game by checkmating your opponent.",
+  "advancements.loffsfieldchess.first_en_passant.title": "En Passant",
+  "advancements.loffsfieldchess.first_en_passant.description": "Capture a pawn en passant."
 }

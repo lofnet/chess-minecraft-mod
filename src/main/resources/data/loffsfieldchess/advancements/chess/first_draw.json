@@ -1,0 +1,22 @@
+{
+  "parent": "minecraft:adventure/root",
+  "display": {
+    "icon": {
+      "item": "loffsfieldchess:chess_table"
+    },
+    "title": {
+      "translate": "advancements.loffsfieldchess.first_draw.title"
+    },
+    "description": {
+      "translate": "advancements.loffsfieldchess.first_draw.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "criteria": {
+    "complete": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

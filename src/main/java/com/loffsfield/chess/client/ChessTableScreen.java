@@ -28,7 +28,7 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
             new ResourceLocation(ChessMod.MOD_ID, "textures/gui/pieces.png");
     private static final int SQUARE_SIZE = 22;
     private static final int BOARD_X = 14;
-    private static final int BOARD_Y = 40;
+    private static final int BOARD_Y = 32;
     private static final int BOARD_SIZE = SQUARE_SIZE * 8;
     private final Set<Integer> markedSquares = new HashSet<>();
     private final Set<Long> arrows = new HashSet<>();
@@ -41,6 +41,13 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
     private Button newGameButton;
     private int selectedSquare = -1;
     private int annotationStart = -1;
+    private ChessMove premove;
+    private boolean draggingPiece;
+    private MatchResult observedResult = MatchResult.ACTIVE;
+    private String observedFen;
+    private int premoveQueuedAtMoveCount = -1;
+    private long resultStartedAt = -1;
+    private long checkStartedAt = -1;
     private long resignConfirmUntil;
     private ChessGame cachedLegalMoveGame;
     private int cachedLegalMoveSquare = -1;
@@ -63,22 +70,22 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         clockButton = addRenderableWidget(Button.builder(clockButtonText(),
                 button -> ChessNetwork.sendAction(MatchActionMessage.CYCLE_CLOCK,
                         (menu.getClockPreset().ordinal() + 1) % ClockPreset.values().length))
-                .bounds(buttonX, topPos + 117, 66, 20).build());
+                .bounds(buttonX, topPos + 109, 66, 20).build());
         drawButton = addRenderableWidget(Button.builder(drawButtonText(),
                 button -> ChessNetwork.sendAction(MatchActionMessage.DRAW, 0))
-                .bounds(buttonX, topPos + 138, 152, 20).build());
+                .bounds(buttonX, topPos + 130, 152, 20).build());
         resignButton = addRenderableWidget(Button.builder(
                 Component.translatable("gui.loffsfieldchess.resign"),
                 button -> onResignPressed())
-                .bounds(buttonX, topPos + 159, 152, 20).build());
+                .bounds(buttonX, topPos + 151, 152, 20).build());
         pgnButton = addRenderableWidget(Button.builder(
                 Component.translatable("gui.loffsfieldchess.share_pgn"),
                 button -> ChessNetwork.sendAction(MatchActionMessage.SHARE_PGN, 0))
-                .bounds(buttonX, topPos + 180, 152, 20).build());
+                .bounds(buttonX, topPos + 172, 152, 20).build());
         newGameButton = addRenderableWidget(Button.builder(
                 Component.translatable("gui.loffsfieldchess.new_game"),
                 button -> ChessNetwork.sendAction(MatchActionMessage.NEW_GAME, 0))
-                .bounds(buttonX, topPos + 201, 152, 20).build());
+                .bounds(buttonX, topPos + 193, 152, 20).build());
     }
 
     @Override
@@ -90,6 +97,7 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         ChessGame game = currentGame();
         updateCachedLegalMoves(game);
         int[] boardColors = boardColors();
+        int checkedSquare = checkFlashAlpha() > 0 ? checkedKingSquare(game) : -1;
         for (int row = 0; row < 8; row++) {
             for (int file = 0; file < 8; file++) {
                 int square = squareForScreen(file, row);
@@ -98,8 +106,20 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
                 boolean light = ((file + row) & 1) == 0;
                 graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE,
                         boardColors[light ? 0 : 1]);
+                if (square == menu.getLastMoveFrom()) {
+                    graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE, 0x6658B4A0);
+                } else if (square == menu.getLastMoveTo()) {
+                    graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE, 0x8870D99A);
+                }
                 if (markedSquares.contains(square)) {
                     graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE, 0x66F4D03F);
+                }
+                if (premove != null && square == premove.to()) {
+                    graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE, 0x99F04444);
+                }
+                if (square == checkedSquare) {
+                    graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE,
+                            withAlpha(0xFFFF3030, checkFlashAlpha()));
                 }
                 if (square == selectedSquare) {
                     graphics.fill(x, y, x + SQUARE_SIZE, y + SQUARE_SIZE, 0x7755D9E8);
@@ -111,7 +131,7 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
                 }
 
                 char piece = game.pieceAt(square);
-                if (piece != '\0') {
+                if (piece != '\0' && !(draggingPiece && square == selectedSquare)) {
                     int pieceOffset = (SQUARE_SIZE - 20) / 2;
                     drawPiece(graphics, piece, x + pieceOffset, y + pieceOffset);
                 }
@@ -121,6 +141,16 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         for (long arrow : arrows) {
             drawArrow(graphics, (int) (arrow >>> 32), (int) arrow, 0xCCF3D44A);
         }
+        if (premove != null) {
+            char piece = game.pieceAt(premove.from());
+            if (piece != '\0') {
+                int file = screenFile(premove.to());
+                int row = screenRow(premove.to());
+                int x = leftPos + BOARD_X + file * SQUARE_SIZE + (SQUARE_SIZE - 20) / 2;
+                int y = topPos + BOARD_Y + row * SQUARE_SIZE + (SQUARE_SIZE - 20) / 2;
+                drawPiece(graphics, piece, x, y, 0.65F);
+            }
+        }
         if (annotationStart >= 0) {
             int hoverSquare = squareAt(mouseX, mouseY);
             if (hoverSquare >= 0 && hoverSquare != annotationStart) {
@@ -128,22 +158,31 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
             }
         }
 
-        if (winnerTranslationKey() != null) {
+        if (draggingPiece && selectedSquare >= 0 && squareAt(mouseX, mouseY) >= 0) {
+            char draggedPiece = game.pieceAt(selectedSquare);
+            if (draggedPiece != '\0') {
+                drawPiece(graphics, draggedPiece, mouseX - 10, mouseY - 10);
+            }
+        }
+
+        float overlayAlpha = resultOverlayAlpha();
+        if (overlayAlpha > 0) {
             boardBlur.render(graphics, game, menu.getAssignedSide(), menu.getFeltColor(), boardColors,
-                    leftPos + BOARD_X, topPos + BOARD_Y);
+                    leftPos + BOARD_X, topPos + BOARD_Y, overlayAlpha);
         } else {
             boardBlur.close();
         }
 
-        graphics.fill(leftPos + 200, topPos + 34, leftPos + 364, topPos + 222, 0xFF17191E);
+        graphics.fill(leftPos + 200, topPos + 26, leftPos + 364, topPos + 214, 0xFF17191E);
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         updateButtons();
+        updateEffectsAndPremove();
         super.render(graphics, mouseX, mouseY, partialTick);
         int infoX = leftPos + 208;
-        int infoY = topPos + 42;
+        int infoY = topPos + 34;
         graphics.drawString(font, Component.translatable("gui.loffsfieldchess.white"),
                 infoX, infoY, 0xFFE7E7E7, false);
         graphics.drawString(font, font.plainSubstrByWidth(menu.getWhiteName(), 66),
@@ -177,7 +216,7 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         }
         Component clockPreset = Component.translatable(menu.getClockPreset().shortTranslationKey());
         graphics.drawString(font, font.plainSubstrByWidth(clockPreset.getString(), 80),
-                infoX + 71, topPos + 123, 0xFFB7B7B7, false);
+                infoX + 71, topPos + 115, 0xFFB7B7B7, false);
 
         boolean blackPerspective = menu.getAssignedSide() == 0;
         for (int row = 0; row < 8; row++) {
@@ -193,6 +232,28 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         }
         drawWinnerOverlay(graphics);
         renderTooltip(graphics, mouseX, mouseY);
+    }
+
+    private void updateEffectsAndPremove() {
+        long now = System.nanoTime();
+        MatchResult result = menu.getMatchResult();
+        if (result != observedResult) {
+            observedResult = result;
+            resultStartedAt = result.isFinished() ? now : -1;
+            if (!result.isFinished()) {
+                premove = null;
+            }
+        }
+        String fen = menu.getFen();
+        if (!fen.equals(observedFen)) {
+            observedFen = fen;
+            checkStartedAt = currentGame().isInCheck(currentGame().isWhiteToMove()) ? now : -1;
+        }
+        if (premove != null && (menu.getMatchResult().isFinished()
+                || menu.getMoveCount() > premoveQueuedAtMoveCount)) {
+            premove = null;
+            premoveQueuedAtMoveCount = -1;
+        }
     }
 
     @Override
@@ -219,28 +280,34 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         if (game.pieceAt(square) == '\0') {
             arrows.clear();
             markedSquares.clear();
+            ChessNetwork.clearPremove(menu.getTablePos());
+            premove = null;
+            premoveQueuedAtMoveCount = -1;
         }
         if (selectedSquare >= 0) {
-            updateCachedLegalMoves(game);
-            ChessMove move = cachedLegalMoves.stream()
-                    .filter(candidate -> candidate.to() == square)
-                    .findFirst().orElse(null);
-            if (move != null && canMove(game)) {
-                char promotion = move.promotion() == '\0' ? '\0' : 'Q';
-                ChessNetwork.sendMove(move.from(), move.to(), promotion);
-                selectedSquare = -1;
+            if (trySelectedMove(game, square)) {
                 return true;
             }
         }
 
         char piece = game.pieceAt(square);
-        if (canMove(game) && piece != '\0'
+        if (canMoveOrQueue(game) && piece != '\0'
                 && Character.isUpperCase(piece) == (menu.getAssignedSide() == 1)) {
             selectedSquare = square;
+            draggingPiece = false;
         } else {
             selectedSquare = -1;
         }
         return true;
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button == 0 && selectedSquare >= 0 && squareAt(mouseX, mouseY) != selectedSquare) {
+            draggingPiece = true;
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
     @Override
@@ -260,6 +327,14 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
             annotationStart = -1;
             return true;
         }
+        if (button == 0 && draggingPiece) {
+            int end = squareAt(mouseX, mouseY);
+            draggingPiece = false;
+            if (end >= 0 && selectedSquare >= 0 && end != selectedSquare) {
+                trySelectedMove(currentGame(), end);
+            }
+            return true;
+        }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
@@ -269,6 +344,46 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
                 && game.result() == ChessResult.IN_PROGRESS
                 && !waitingForOpponent()
                 && menu.getMatchResult() == MatchResult.ACTIVE;
+    }
+
+    private boolean canMoveOrQueue(ChessGame game) {
+        return menu.getAssignedSide() >= 0 && game.result() == ChessResult.IN_PROGRESS
+                && menu.getMatchResult() == MatchResult.ACTIVE;
+    }
+
+    private boolean trySelectedMove(ChessGame game, int targetSquare) {
+        if (selectedSquare < 0 || targetSquare == selectedSquare) {
+            return false;
+        }
+        if (canMove(game)) {
+            updateCachedLegalMoves(game);
+            ChessMove move = cachedLegalMoves.stream()
+                    .filter(candidate -> candidate.to() == targetSquare)
+                    .findFirst().orElse(null);
+            if (move == null) {
+                return false;
+            }
+            ChessNetwork.sendMove(move.from(), move.to(), move.promotion());
+            selectedSquare = -1;
+            draggingPiece = false;
+            return true;
+        }
+        if (!canMoveOrQueue(game)) {
+            return false;
+        }
+        if ((menu.getAssignedSide() == 1) == game.isWhiteToMove()) {
+            return false;
+        }
+        char piece = game.pieceAt(selectedSquare);
+        char promotion = Character.toUpperCase(piece) == 'P'
+                && (targetSquare / 8 == 0 || targetSquare / 8 == 7) ? 'Q' : '\0';
+        premove = new ChessMove(selectedSquare, targetSquare, promotion);
+        premoveQueuedAtMoveCount = menu.getMoveCount();
+        ChessNetwork.sendPremove(menu.getTablePos(),
+                premove.from(), premove.to(), premove.promotion());
+        selectedSquare = -1;
+        draggingPiece = false;
+        return true;
     }
 
     private void updateButtons() {
@@ -321,6 +436,10 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
             return Component.translatable(game.isWhiteToMove()
                     ? "gui.loffsfieldchess.white_to_move" : "gui.loffsfieldchess.black_to_move");
         }
+        if (isCheckmateResult(menu.getMatchResult())
+                && System.nanoTime() - resultStartedAt < 500_000_000L) {
+            return Component.empty();
+        }
         return switch (menu.getMatchResult()) {
             case ACTIVE -> Component.empty();
             case WHITE_CHECKMATED -> Component.translatable("gui.loffsfieldchess.black_wins");
@@ -339,13 +458,15 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
                     "gui.loffsfieldchess.black_wins_overlay";
             case BLACK_CHECKMATED, BLACK_RESIGNED, BLACK_FLAGGED ->
                     "gui.loffsfieldchess.white_wins_overlay";
-            case ACTIVE, STALEMATE, DRAW_AGREED -> null;
+            case STALEMATE, DRAW_AGREED -> "gui.loffsfieldchess.draw_overlay";
+            case ACTIVE -> null;
         };
     }
 
     private void drawWinnerOverlay(GuiGraphics graphics) {
         String translationKey = winnerTranslationKey();
-        if (translationKey == null) {
+        float alpha = winnerMessageAlpha();
+        if (translationKey == null || alpha <= 0) {
             return;
         }
 
@@ -356,14 +477,74 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         int centerY = topPos + BOARD_Y + BOARD_SIZE / 2;
         int boxWidth = Math.min(BOARD_SIZE - 12, Math.round(textWidth * textScale) + 18);
         graphics.fill(centerX - boxWidth / 2, centerY - 13,
-                centerX + boxWidth / 2, centerY + 13, 0xD911151B);
+                centerX + boxWidth / 2, centerY + 13, withAlpha(0xD911151B, alpha));
 
         graphics.pose().pushPose();
         graphics.pose().translate(centerX, centerY, 0);
         graphics.pose().scale(textScale, textScale, 1);
         graphics.drawString(font, winner.getVisualOrderText(), -textWidth / 2.0F,
-                -font.lineHeight / 2.0F, 0xFFFFFFFF, true);
+                -font.lineHeight / 2.0F, withAlpha(0xFFFFFFFF, alpha), true);
         graphics.pose().popPose();
+    }
+
+    private float winnerMessageAlpha() {
+        if (resultStartedAt < 0) {
+            return 0;
+        }
+        long elapsed = System.nanoTime() - resultStartedAt;
+        long duration = 2_000_000_000L;
+        long delay = isCheckmateResult(menu.getMatchResult()) ? 500_000_000L : 0;
+        if (elapsed < delay || elapsed >= duration) {
+            return 0;
+        }
+        float fadeIn = Math.min(1.0F, (elapsed - delay) / 250_000_000.0F);
+        float fadeOut = Math.min(1.0F, (duration - elapsed) / 400_000_000.0F);
+        return Math.min(fadeIn, fadeOut);
+    }
+
+    private static boolean isCheckmateResult(MatchResult result) {
+        return result == MatchResult.WHITE_CHECKMATED || result == MatchResult.BLACK_CHECKMATED;
+    }
+
+    private float resultOverlayAlpha() {
+        if (resultStartedAt < 0) {
+            return 0;
+        }
+        long elapsed = System.nanoTime() - resultStartedAt;
+        long duration = 2_000_000_000L;
+        if (elapsed < 0 || elapsed >= duration) {
+            return 0;
+        }
+        float fadeIn = Math.min(1.0F, elapsed / 250_000_000.0F);
+        float fadeOut = Math.min(1.0F, (duration - elapsed) / 400_000_000.0F);
+        return Math.min(fadeIn, fadeOut);
+    }
+
+    private float checkFlashAlpha() {
+        if (checkStartedAt < 0) {
+            return 0;
+        }
+        long elapsed = System.nanoTime() - checkStartedAt;
+        if (elapsed < 0 || elapsed >= 500_000_000L) {
+            return 0;
+        }
+        return (float) Math.sin(Math.PI * elapsed / 500_000_000.0D);
+    }
+
+    private int checkedKingSquare(ChessGame game) {
+        char king = game.isWhiteToMove() ? 'K' : 'k';
+        for (int square = 0; square < 64; square++) {
+            if (game.pieceAt(square) == king) {
+                return square;
+            }
+        }
+        return -1;
+    }
+
+    private static int withAlpha(int color, float alpha) {
+        int colorAlpha = (color >>> 24) & 0xFF;
+        int adjustedAlpha = Math.round(colorAlpha * Math.max(0, Math.min(1, alpha)));
+        return adjustedAlpha << 24 | color & 0x00FFFFFF;
     }
 
     private String clockText(long millis) {
@@ -463,6 +644,10 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
     }
 
     private static void drawPiece(GuiGraphics graphics, char piece, int x, int y) {
+        drawPiece(graphics, piece, x, y, 1.0F);
+    }
+
+    private static void drawPiece(GuiGraphics graphics, char piece, int x, int y, float alpha) {
         int column = switch (Character.toUpperCase(piece)) {
             case 'P' -> 0;
             case 'N' -> 1;
@@ -474,7 +659,9 @@ public final class ChessTableScreen extends AbstractContainerScreen<ChessTableMe
         };
         int row = Character.isUpperCase(piece) ? 0 : 1;
         RenderSystem.enableBlend();
+        graphics.setColor(1.0F, 1.0F, 1.0F, alpha);
         graphics.blit(PIECES, x, y, 20, 20, column * 32, row * 32, 32, 32, 192, 64);
+        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
         RenderSystem.disableBlend();
     }
 }
